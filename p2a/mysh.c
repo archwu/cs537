@@ -6,69 +6,74 @@
 #include <unistd.h>
 
 #define INPUT_SIZE 514
-
+#define HISTORY_SIZE 20
 char *words[INPUT_SIZE];
 int is_batch = 0;
 int is_redirection = 0;
 char *preToken, *postToken;
-
+char *history;
+int history_count = 0;
+int history_head = 0;
+int history_tail = 0;
 char prompt_message[6] = "mysh #";
 char error_message[30] = "An error has occurred\n";
 
-typedef struct circular_buffer
-{
-    void *buffer;     // data buffer
-    void *buffer_end; // end of data buffer
-    size_t capacity;  // maximum number of items in the buffer
-    size_t count;     // number of items in the buffer
-    size_t sz;        // size of each item in the buffer
-    void *head;       // pointer to head
-    void *tail;       // pointer to tail
-} circular_buffer;
+int add_history(char*args){
+  history_count++;
+  //when buffer is full
+  if(history_tail==history_head-1||(history_tail + history_head)== 19){
+    history[history_head]=strdup(args);
+    history_tail = history_head;
+    history_head = (history_head+1)%HISTORY_SIZE;
+  }
+  //when buffer is not full
+  else if(history_tail>history_head){
+    history[history_tail]=strdup(args);
+    history_tail++;
+  }
+  return 0;
+}
 
-void cb_init(circular_buffer *cb, size_t capacity, size_t sz)
-{
-    cb->buffer = malloc(capacity * sz);
-    if(cb->buffer == NULL){
-      fprintf(stderr, "mysh: buffer allocation failed\n");
+int printhistory(void){
+  if(history_count<20){
+      for (size_t i = 0; i < history_tail+1; i++) {
+        printf("%4d %s\n",i,&history[i]);
+      }
     }
-        // handle error
-    cb->buffer_end = (char *)cb->buffer + capacity * sz;
-    cb->capacity = capacity;
-    cb->count = 0;
-    cb->sz = sz;
-    cb->head = cb->buffer;
-    cb->tail = cb->buffer;
+
+  else{
+    for (size_t i = history_head; i < HISTORY_SIZE; i++) {
+      printf("%4d %s\n",(history_count - HISTORY_SIZE + i - history_head),&history[i]);
+    }
+    for (size_t j = 0; j <= history_tail; j++) {
+      printf("%4d %s\n",history_count - history_tail + j,&history[j]);
+    }
+  }
 }
 
-void cb_free(circular_buffer *cb)
+int launch(char **args)
 {
-    free(cb->buffer);
-    // clear out other fields too, just to be safe
-}
+  pid_t pid;
+  int status;
 
-void cb_push_back(circular_buffer *cb, const void *item)
-{
-    if(cb->count == cb->capacity)
-        // handle error
-    memcpy(cb->head, item, cb->sz);
-    cb->head = (char*)cb->head + cb->sz;
-    if(cb->head == cb->buffer_end)
-        cb->head = cb->buffer;
-    cb->count++;
-}
+  pid = fork();
+  if(pid == 0){
+    if(execvp(args[0], args) == -1){
+      fprintf(stderr, "mysh: fork failed\n");
+    }
+    exit(EXIT_FAILURE);
+  }
+  else if(pid < 0){
+    fprintf(stderr, "mysh: fork failed!\n");
+  }
+  else{
+    do{
+      waitpid(pid,&status, WUNTRACED);
+    }while(!WIFEXITED(status) && !WIFSIGNALED(status));
+  }
 
-void cb_pop_front(circular_buffer *cb, void *item)
-{
-    if(cb->count == 0)
-        // handle error
-    memcpy(item, cb->tail, cb->sz);
-    cb->tail = (char*)cb->tail + cb->sz;
-    if(cb->tail == cb->buffer_end)
-        cb->tail = cb->buffer;
-    cb->count--;
+  return 1;
 }
-
 
 void prompt() {
     if (!is_batch)
@@ -99,6 +104,12 @@ int main (int argc, char *argv[]) {
     int outFile, outFile_1;
     char input[INPUT_SIZE];
     int count = 0, i;
+
+    // Initialize history buffer
+    history = malloc(sizeof(char)*(HISTORY_SIZE*INPUT_SIZE));
+    for (int ind = 0; ind < count; ind++) {
+      history[ind]=NULL;
+    }
 
     // Interactive or batch mode
     if (argc == 1)
@@ -182,6 +193,17 @@ int main (int argc, char *argv[]) {
             }
             else
                 exit(0);
+        }
+        else if(!strcmp("history", words[0])){
+          if (count != 1) {
+              error();
+              continue;
+          }
+          else
+              printhistory();
+        }
+        else{
+          launch(words[0]);
         }
     }
 
